@@ -1,0 +1,17 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify package
+        run: ./scripts/verify.sh
+      - name: Build universal app
+        run: ./build.sh
+      - name: Check app architectures
+        run: lipo -archs "dist/Codex Usage.app/Contents/MacOS/CodexUsage"
