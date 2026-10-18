@@ -82,7 +82,7 @@ final class ResetCelebrationPanel: NSObject {
         let controller = ResetCelebrationViewController()
         controller.setDemoMode(CommandLine.arguments.contains("--demo"))
         let previewEvents = awaitingConfirmation ? [] : [event]
-        controller.update(events: previewEvents, snapshot: snapshot, decision: decision, idea: ResetIdeaPreview(text: "把双额度恢复状态和提醒打磨完整。", savedIdeaID: UUID(), isDraft: false), language: language, append: false, reduceMotionOverride: true)
+        controller.update(events: previewEvents, snapshot: snapshot, decision: decision, idea: ResetIdeaPreview(text: language.text("把双额度恢复状态和提醒打磨完整。", "Polish the dual-quota recovery status and reminder."), savedIdeaID: UUID(), isDraft: false), language: language, append: false, reduceMotionOverride: true)
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 392, height: 496), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

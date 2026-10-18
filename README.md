@@ -16,7 +16,13 @@ The menu-bar signal is compact by design: a small fill shows the selected remain
 
 When a reset is confirmed, a midnight-blue starfield brings a little ceremony to the moment. The reminder stays open until dismissed, respects Reduce Motion, and never claims you can resume work unless **both** the 5-hour and 7-day windows are available and the Codex server allows it.
 
-![Full quota reset celebration](assets/showcase/reset-available.png)
+English:
+
+![English full quota reset celebration](assets/showcase/reset-available-en.png)
+
+简体中文：
+
+![中文额度完全恢复星辰提醒](assets/showcase/reset-available.png)
 
 ## What it does
 
