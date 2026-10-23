@@ -51,7 +51,7 @@ open "dist/Codex Usage.app"
 
 The build is ad-hoc signed and **not Developer ID signed or notarized**. For now, building from source is the recommended way to try the app. A Codex CLI path found on the build machine is recorded as a convenience; on another Mac the app checks common CLI locations. The CLI manages its own authentication.
 
-Use **Launch at login** in the menu-bar panel to opt in or out. When macOS requires approval, the app offers a shortcut to System Settings → General → Login Items.
+Use **Launch at login** in the menu-bar panel to opt in or out. When macOS requires approval, the app offers a shortcut to System Settings → General → Login Items. On ad-hoc-signed builds where macOS cannot register the app service, the switch uses a per-user LaunchAgent instead; it takes effect at the next login.
 
 To build only the Swift executable:
 

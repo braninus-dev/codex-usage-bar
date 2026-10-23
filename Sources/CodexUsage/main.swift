@@ -371,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 self.popoverController.setLaunchAtLoginStatus(
                     self.launchAtLoginManager.status,
-                    showError: true
+                    errorMessage: error.localizedDescription
                 )
             }
         }
@@ -742,6 +742,49 @@ if let index = CommandLine.arguments.firstIndex(of: "--preview-reset"), CommandL
     do { try writeQuoteLayoutMeasurements(to: CommandLine.arguments[index + 1]) }
     catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
     exit(0)
+} else if CommandLine.arguments.contains("--login-item-status") {
+    let manager = LaunchAtLoginManager()
+    print("bundle=\(Bundle.main.bundleURL.path)")
+    print("bundle_id=\(Bundle.main.bundleIdentifier ?? "unknown")")
+    print("service_status=\(manager.systemStatusDescription)")
+    print("effective_status=\(manager.status)")
+    print("fallback_agent=\(manager.fallbackAgentPath)")
+    exit(0)
+} else if CommandLine.arguments.contains("--test-login-item-toggle") {
+    let manager = LaunchAtLoginManager()
+    guard manager.status == .disabled, manager.fallbackIsRequired else {
+        fputs("Refusing round-trip test because login startup is not initially disabled.\n", stderr)
+        exit(2)
+    }
+    do {
+        try manager.setEnabled(true)
+        guard manager.status == .fallbackEnabled else {
+            throw NSError(domain: "CodexUsage.LoginAtLoginTest", code: 1, userInfo: [NSLocalizedDescriptionKey: "Fallback login item did not become enabled."])
+        }
+        let agentURL = URL(fileURLWithPath: manager.fallbackAgentPath)
+        let data = try Data(contentsOf: agentURL)
+        guard let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              plist["Label"] as? String == "local.codex.usage-bar.login",
+              (plist["AssociatedBundleIdentifiers"] as? [String])?.contains("local.codex.usage-bar") == true,
+              (plist["ProgramArguments"] as? [String])?.first == Bundle.main.executableURL?.path,
+              plist["RunAtLoad"] as? Bool == true,
+              plist["KeepAlive"] as? Bool == false,
+              plist["LimitLoadToSessionType"] as? String == "Aqua",
+              (try FileManager.default.attributesOfItem(atPath: agentURL.path)[.posixPermissions] as? NSNumber)?.intValue == 0o600 else {
+            throw NSError(domain: "CodexUsage.LoginAtLoginTest", code: 3, userInfo: [NSLocalizedDescriptionKey: "Fallback login item plist did not match the expected contents and permissions."])
+        }
+        print("enabled=\(manager.status), plist=valid, permissions=0600")
+        try manager.setEnabled(false)
+        guard manager.status == .disabled, !FileManager.default.fileExists(atPath: manager.fallbackAgentPath) else {
+            throw NSError(domain: "CodexUsage.LoginAtLoginTest", code: 2, userInfo: [NSLocalizedDescriptionKey: "Login startup did not return to disabled."])
+        }
+        print("restored=\(manager.status)")
+        exit(0)
+    } catch {
+        try? manager.setEnabled(false)
+        fputs(error.localizedDescription + "\n", stderr)
+        exit(1)
+    }
 } else if CommandLine.arguments.contains("--probe") {
     let client = UsageClient()
     client.onUpdate = { result in

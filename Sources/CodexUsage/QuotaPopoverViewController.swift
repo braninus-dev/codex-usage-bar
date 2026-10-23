@@ -62,7 +62,7 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
     private var language = AppLanguage.initial()
     private var quote: FamousQuote?
     private var launchAtLoginStatus: LaunchAtLoginStatus = .disabled
-    private var launchAtLoginHasError = false
+    private var launchAtLoginErrorMessage: String?
     private var launchAtLoginInteractive = true
 
     override func loadView() {
@@ -413,10 +413,10 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
         resetSoundToggle.state = enabled ? .on : .off
     }
 
-    func setLaunchAtLoginStatus(_ status: LaunchAtLoginStatus, showError: Bool = false, interactive: Bool = true) {
+    func setLaunchAtLoginStatus(_ status: LaunchAtLoginStatus, errorMessage: String? = nil, interactive: Bool = true) {
         _ = self.view
         launchAtLoginStatus = status
-        launchAtLoginHasError = showError
+        launchAtLoginErrorMessage = errorMessage
         launchAtLoginInteractive = interactive
         renderLaunchAtLoginStatus()
     }
@@ -465,11 +465,12 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
 
     private func renderLaunchAtLoginStatus() {
         launchAtLoginToggle.state = launchAtLoginStatus.isOn ? .on : .off
-        launchAtLoginToggle.isEnabled = launchAtLoginInteractive && launchAtLoginStatus != .unavailable
+        launchAtLoginToggle.isEnabled = launchAtLoginInteractive
         openLoginItemsSettingsButton.isHidden = !launchAtLoginStatus.canOpenSettings
         openLoginItemsSettingsButton.isEnabled = launchAtLoginInteractive && launchAtLoginStatus.canOpenSettings
-        if launchAtLoginHasError {
-            launchAtLoginStatusLabel.stringValue = language.text("无法更改登录启动设置，请重试。", "Couldn't change the login item. Please try again.")
+        if let errorMessage = launchAtLoginErrorMessage {
+            let prefix = language.text("更改登录启动设置失败：", "Could not change the login item: ")
+            launchAtLoginStatusLabel.stringValue = prefix + errorMessage
         } else {
             launchAtLoginStatusLabel.stringValue = launchAtLoginStatus.message(in: language) ?? ""
         }

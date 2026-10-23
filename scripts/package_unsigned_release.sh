@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="0.6.0"
+VERSION="0.6.1"
 APP_NAME="Codex Usage"
 APP_PATH="$ROOT_DIR/dist/$APP_NAME.app"
 ZIP_PATH="$ROOT_DIR/dist/Codex-Usage-Bar-macOS-universal-v$VERSION-unsigned.zip"
