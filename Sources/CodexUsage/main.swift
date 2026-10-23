@@ -162,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var status: NSStatusItem!
     private var instanceLockDescriptor: Int32 = -1
     private let client = UsageClient()
+    private let launchAtLoginManager = LaunchAtLoginManager()
     private var refreshTimer: Timer?
     private var countdownTimer: Timer?
     private var draftSaveTimer: Timer?
@@ -362,6 +363,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(enabled, forKey: "codexUsage.resetSoundEnabled")
         }
         popoverController.onPreviewResetSound = { ResetSoundPlayer.shared.play() }
+        popoverController.onLaunchAtLoginChanged = { [weak self] enabled in
+            guard let self, !self.demoMode else { return }
+            do {
+                try self.launchAtLoginManager.setEnabled(enabled)
+                self.popoverController.setLaunchAtLoginStatus(self.launchAtLoginManager.status)
+            } catch {
+                self.popoverController.setLaunchAtLoginStatus(
+                    self.launchAtLoginManager.status,
+                    showError: true
+                )
+            }
+        }
+        popoverController.onOpenLoginItemsSettings = { [weak self] in
+            self?.launchAtLoginManager.openLoginItemsSettings()
+        }
+        popoverController.setLaunchAtLoginStatus(launchAtLoginManager.status, interactive: !demoMode)
     }
 
     private func selectQuoteForPopoverOpening() {
@@ -503,7 +520,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPopover(forceDraft: Bool = false, focusIdeaID: UUID? = nil) {
         guard let button = status.button else { return }
         let isOpening = !popover.isShown
-        if isOpening { selectQuoteForPopoverOpening() }
+        if isOpening {
+            selectQuoteForPopoverOpening()
+            popoverController.setLaunchAtLoginStatus(launchAtLoginManager.status, interactive: !demoMode)
+        }
         render(forceDraft: forceDraft)
         if isOpening { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
         if forceDraft { popoverController.focusDraftEditor() }

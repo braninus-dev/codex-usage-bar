@@ -25,6 +25,8 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
     var onOpenQuoteSource: ((URL) -> Void)?
     var onResetSoundChanged: ((Bool) -> Void)?
     var onPreviewResetSound: (() -> Void)?
+    var onLaunchAtLoginChanged: ((Bool) -> Void)?
+    var onOpenLoginItemsSettings: (() -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "Codex 使用额度")
     private let languagePicker = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -47,6 +49,9 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
     private let quitButton = NSButton(title: "退出", target: nil, action: nil)
     private let resetSoundToggle = NSButton(checkboxWithTitle: "重置提示音", target: nil, action: nil)
     private let previewResetSoundButton = NSButton(title: "试听", target: nil, action: nil)
+    private let launchAtLoginToggle = NSButton(checkboxWithTitle: "登录时启动", target: nil, action: nil)
+    private let launchAtLoginStatusLabel = NSTextField(wrappingLabelWithString: "")
+    private let openLoginItemsSettingsButton = NSButton(title: "打开系统设置", target: nil, action: nil)
     private let ideaList = NSStackView()
     private var displayedIdeas: [SavedIdea] = []
     private var editingIdeaID: UUID?
@@ -56,6 +61,9 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
     private var initialScrollPositionSet = false
     private var language = AppLanguage.initial()
     private var quote: FamousQuote?
+    private var launchAtLoginStatus: LaunchAtLoginStatus = .disabled
+    private var launchAtLoginHasError = false
+    private var launchAtLoginInteractive = true
 
     override func loadView() {
         let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 360, height: 540))
@@ -259,6 +267,30 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
         previewResetSoundButton.bezelStyle = .texturedRounded
         stack.addArrangedSubview(resetSoundRow)
 
+        launchAtLoginToggle.target = self
+        launchAtLoginToggle.action = #selector(launchAtLoginChanged)
+        launchAtLoginToggle.setAccessibilityLabel("登录时启动 Codex Usage Bar")
+        launchAtLoginStatusLabel.font = .systemFont(ofSize: 10)
+        launchAtLoginStatusLabel.textColor = .codexSecondaryLabel
+        launchAtLoginStatusLabel.maximumNumberOfLines = 2
+        launchAtLoginStatusLabel.lineBreakMode = .byWordWrapping
+        launchAtLoginStatusLabel.widthAnchor.constraint(equalToConstant: 250).isActive = true
+        launchAtLoginStatusLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        openLoginItemsSettingsButton.target = self
+        openLoginItemsSettingsButton.action = #selector(openLoginItemsSettings)
+        openLoginItemsSettingsButton.bezelStyle = .texturedRounded
+        let launchAtLoginRow = NSStackView(views: [launchAtLoginToggle, openLoginItemsSettingsButton])
+        launchAtLoginRow.orientation = .horizontal
+        launchAtLoginRow.alignment = .centerY
+        launchAtLoginRow.spacing = 8
+        launchAtLoginRow.widthAnchor.constraint(equalToConstant: 328).isActive = true
+        let launchAtLoginSettings = NSStackView(views: [launchAtLoginRow, launchAtLoginStatusLabel])
+        launchAtLoginSettings.orientation = .vertical
+        launchAtLoginSettings.alignment = .leading
+        launchAtLoginSettings.spacing = 2
+        launchAtLoginSettings.widthAnchor.constraint(equalToConstant: 328).isActive = true
+        stack.addArrangedSubview(launchAtLoginSettings)
+
         let footer = NSStackView()
         footer.orientation = .horizontal
         footer.alignment = .centerY
@@ -381,6 +413,14 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
         resetSoundToggle.state = enabled ? .on : .off
     }
 
+    func setLaunchAtLoginStatus(_ status: LaunchAtLoginStatus, showError: Bool = false, interactive: Bool = true) {
+        _ = self.view
+        launchAtLoginStatus = status
+        launchAtLoginHasError = showError
+        launchAtLoginInteractive = interactive
+        renderLaunchAtLoginStatus()
+    }
+
     private func applyLanguage() {
         titleLabel.stringValue = language.text("Codex 使用额度", "Codex usage")
         let availableLanguages = AppLanguage.allCases
@@ -395,6 +435,10 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
         resetSoundToggle.title = language.text("重置提示音", "Reset chime")
         resetSoundToggle.setAccessibilityLabel(language.text("重置成功提示音", "Reset success sound"))
         previewResetSoundButton.title = language.text("试听", "Preview")
+        launchAtLoginToggle.title = language.text("登录时启动", "Launch at login")
+        launchAtLoginToggle.setAccessibilityLabel(language.text("登录时启动 Codex Usage Bar", "Launch Codex Usage Bar at login"))
+        openLoginItemsSettingsButton.title = language.text("打开系统设置", "System Settings")
+        renderLaunchAtLoginStatus()
         libraryButton.title = language.text("灵感库", "Idea library")
         quoteSourceButton.title = language.text("出处", "Source")
         saveButton.title = editingIdeaID == nil ? language.text("保存灵感", "Save idea") : language.text("更新灵感", "Update idea")
@@ -417,6 +461,19 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
         quoteTextLabel.setAccessibilityLabel(quoteTextLabel.stringValue)
         quoteAttributionLabel.setAccessibilityLabel(quoteAttributionLabel.stringValue)
         quoteSourceButton.isEnabled = true
+    }
+
+    private func renderLaunchAtLoginStatus() {
+        launchAtLoginToggle.state = launchAtLoginStatus.isOn ? .on : .off
+        launchAtLoginToggle.isEnabled = launchAtLoginInteractive && launchAtLoginStatus != .unavailable
+        openLoginItemsSettingsButton.isHidden = !launchAtLoginStatus.canOpenSettings
+        openLoginItemsSettingsButton.isEnabled = launchAtLoginInteractive && launchAtLoginStatus.canOpenSettings
+        if launchAtLoginHasError {
+            launchAtLoginStatusLabel.stringValue = language.text("无法更改登录启动设置，请重试。", "Couldn't change the login item. Please try again.")
+        } else {
+            launchAtLoginStatusLabel.stringValue = launchAtLoginStatus.message(in: language) ?? ""
+        }
+        launchAtLoginStatusLabel.isHidden = launchAtLoginStatusLabel.stringValue.isEmpty
     }
 
     private func updateDocumentHeight() {
@@ -523,6 +580,8 @@ final class QuotaPopoverViewController: NSViewController, NSTextViewDelegate {
     @objc private func openIdeaLibraryTapped() { onOpenIdeaLibrary?() }
     @objc private func resetSoundChanged() { onResetSoundChanged?(resetSoundToggle.state == .on) }
     @objc private func previewResetSound() { onPreviewResetSound?() }
+    @objc private func launchAtLoginChanged() { onLaunchAtLoginChanged?(launchAtLoginToggle.state == .on) }
+    @objc private func openLoginItemsSettings() { onOpenLoginItemsSettings?() }
     @objc private func quitTapped() { onQuit?() }
 }
 

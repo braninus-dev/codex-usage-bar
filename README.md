@@ -31,6 +31,7 @@ English:
 - **A place for the almost-lost thought.** Capture a draft while waiting, then browse, edit, copy, and organize saved ideas locally. The app never sends an idea to Codex or executes it.
 - **A spark of perspective.** Each open offers one of 99 sourced thinking quotes. Choose Chinese or English manually; each view shows one language at a time.
 - **A small cosmic celebration.** A confirmed full reset can open a starfield reminder with a gentle optional chime. The notice stays until you dismiss it. Partial resets remain calm and precise.
+- **Your choice at login.** Turn automatic startup on or off from the menu-bar panel; macOS approval status is shown when needed.
 - **Local by design.** Usage is read from the Codex CLI app-server. Drafts and reset metadata stay on this Mac; prompts, conversations, and credentials are not read or uploaded.
 
 ## Install and build
@@ -49,6 +50,8 @@ open "dist/Codex Usage.app"
 ```
 
 The build is ad-hoc signed and **not Developer ID signed or notarized**. For now, building from source is the recommended way to try the app. A Codex CLI path found on the build machine is recorded as a convenience; on another Mac the app checks common CLI locations. The CLI manages its own authentication.
+
+Use **Launch at login** in the menu-bar panel to opt in or out. When macOS requires approval, the app offers a shortcut to System Settings → General → Login Items.
 
 To build only the Swift executable:
 
