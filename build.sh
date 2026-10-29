@@ -62,8 +62,8 @@ cat > "$STAGING/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>CodexUsage</string>
 <key>CFBundleIdentifier</key><string>local.codex.usage-bar</string>
 <key>CFBundleName</key><string>Codex Usage</string>
-<key>CFBundleVersion</key><string>8</string>
-<key>CFBundleShortVersionString</key><string>0.6.1</string>
+<key>CFBundleVersion</key><string>9</string>
+<key>CFBundleShortVersionString</key><string>0.6.2</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

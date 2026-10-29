@@ -53,6 +53,8 @@ The build is ad-hoc signed and **not Developer ID signed or notarized**. For now
 
 Use **Launch at login** in the menu-bar panel to opt in or out. When macOS requires approval, the app offers a shortcut to System Settings → General → Login Items. On ad-hoc-signed builds where macOS cannot register the app service, the switch uses a per-user LaunchAgent instead; it takes effect at the next login.
 
+Account changes sync automatically: the app refreshes when Codex reports an account update, reacts to `auth.json` metadata changes without reading the file contents, and restarts its private app-server during the 60-second refresh cycle so file- and Keychain-backed sign-ins both pick up a newly selected account.
+
 To build only the Swift executable:
 
 ```sh

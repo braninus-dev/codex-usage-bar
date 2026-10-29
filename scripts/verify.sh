@@ -22,6 +22,7 @@ case "$(uname -m)" in
     *) echo "Unsupported native architecture for AppKit quote measurement: $(uname -m)" >&2; exit 1 ;;
 esac
 "$NATIVE_EXECUTABLE" --measure-quotes "$QUOTE_LAYOUT_REPORT"
+"$NATIVE_EXECUTABLE" --test-auth-file-monitor
 QUOTE_LAYOUT_LINES="$(wc -l < "$QUOTE_LAYOUT_REPORT" | tr -d '[:space:]')"
 test "$QUOTE_LAYOUT_LINES" -eq 199
 echo "198 native quote and attribution layouts measured: passed"

@@ -10,9 +10,12 @@ final class UsageClient {
     private var process: Process?
     private var input: FileHandle?
     private var pending = false
+    private var refreshAfterCurrentRequest = false
     private var requestID = 1
     private var deadline: DispatchWorkItem?
+    private var processStartedAt: TimeInterval = 0
     private let reader = DispatchQueue(label: "codex-usage-reader")
+    var onAccountContextUpdated: (() -> Void)?
 
     func refresh() {
         guard !pending else { return }
@@ -47,6 +50,7 @@ final class UsageClient {
             p.standardInput = stdin; p.standardOutput = stdout; p.standardError = FileHandle.nullDevice
             try p.run()
             process = p; input = stdin.fileHandleForWriting
+            processStartedAt = ProcessInfo.processInfo.systemUptime
             reader.async { [weak self] in
                 var buffer = Data()
                 while true {
@@ -81,6 +85,20 @@ final class UsageClient {
         send(["id": requestID, "method": "account/rateLimits/read"])
     }
     private func receive(_ message: [String: Any]) {
+        if let method = message["method"] as? String {
+            let startupAge = ProcessInfo.processInfo.systemUptime - processStartedAt
+            guard startupAge >= 3 else { return }
+            switch method {
+            case "account/updated":
+                onAccountContextUpdated?()
+                requestUsageAfterCurrentRequest()
+            case "account/rateLimits/updated":
+                requestUsageAfterCurrentRequest()
+            default:
+                break
+            }
+            return
+        }
         if message["id"] as? Int == 0 {
             guard message["error"] == nil else { fail("Codex 初始化失败，请更新 CLI 后重试"); return }
             send(["method": "initialized", "params": [:]])
@@ -90,13 +108,35 @@ final class UsageClient {
         guard let result = message["result"] as? [String: Any], let snapshot = UsageSnapshot(result) else {
             fail("无法获取额度，请检查 Codex 登录状态及网络"); return
         }
+        if refreshAfterCurrentRequest {
+            refreshAfterCurrentRequest = false
+            requestUsage()
+            return
+        }
         pending = false; deadline?.cancel(); onUpdate?(.success(snapshot))
     }
+    private func requestUsageAfterCurrentRequest() {
+        if pending {
+            refreshAfterCurrentRequest = true
+        } else {
+            refresh()
+        }
+    }
     private func fail(_ text: String) {
-        pending = false; deadline?.cancel(); stop()
+        pending = false; refreshAfterCurrentRequest = false; deadline?.cancel(); deadline = nil; stop()
         onUpdate?(.failure(NSError(domain: "UsageBar", code: 2, userInfo: [NSLocalizedDescriptionKey: text])))
     }
+    func restartAndRefresh() {
+        pending = false
+        refreshAfterCurrentRequest = false
+        deadline?.cancel(); deadline = nil
+        stop()
+        refresh()
+    }
     func stop() {
+        pending = false
+        refreshAfterCurrentRequest = false
+        deadline?.cancel(); deadline = nil
         input?.closeFile(); input = nil
         let p = process; process = nil
         if let p, p.isRunning {
@@ -165,6 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginManager = LaunchAtLoginManager()
     private var refreshTimer: Timer?
     private var countdownTimer: Timer?
+    private var authFileMonitor: CodexAuthFileMonitor?
+    private var authFileChangeWorkItem: DispatchWorkItem?
     private var draftSaveTimer: Timer?
     private var popover: NSPopover!
     private var popoverController: QuotaPopoverViewController!
@@ -178,6 +220,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resetTrackerLoadFailure = false
     private var snapshot: UsageSnapshot?
     private var quotaReadFailed = false
+    private var accountSyncing = false
+    private var discardSnapshotOnRefreshFailure = false
     private var language = AppLanguage.initial()
     private var quoteBag = QuoteShuffleBag()
     private var currentQuote: FamousQuote?
@@ -223,6 +267,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .success(let value): self?.acceptSnapshot(value)
             case .failure:
                 guard let self else { return }
+                if self.discardSnapshotOnRefreshFailure { self.snapshot = nil }
+                self.discardSnapshotOnRefreshFailure = false
+                self.accountSyncing = false
                 self.quotaReadFailed = true
                 if self.celebrationPanel.isVisible {
                     self.celebrationPanel.refresh(snapshot: nil, decision: self.currentDecision(), idea: nil, language: self.language)
@@ -230,12 +277,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.render()
             }
         }
+        client.onAccountContextUpdated = { [weak self] in self?.beginAccountSync() }
+        if !demoMode {
+            let authFileURL = Self.codexHomeURL().appendingPathComponent("auth.json", isDirectory: false)
+            authFileMonitor = CodexAuthFileMonitor(authFileURL: authFileURL) { [weak self] in
+                self?.codexAuthFileChanged()
+            }
+            authFileMonitor?.start()
+        }
         render()
         if demoMode {
             startDemoSequence()
         } else {
             client.refresh()
-            refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.client.refresh() }
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                guard let self, self.authFileChangeWorkItem == nil else { return }
+                self.discardSnapshotOnRefreshFailure = true
+                self.client.restartAndRefresh()
+            }
         }
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         if !demoMode {
@@ -251,6 +310,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let accountChanged = snapshot.map { $0.accountID != value.accountID } ?? false
         if accountChanged { celebrationPanel.close() }
         snapshot = value
+        discardSnapshotOnRefreshFailure = false
+        accountSyncing = false
         quotaReadFailed = false
         confirmationRefreshAttempted = false
         let presentedReset = observeResets(value, wasAvailable: wasAvailable, accountChanged: accountChanged)
@@ -300,7 +361,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ? language.text("当前显示 \(label)", "Showing \(label)")
             : language.text("重置倒计时 \(label)", "Reset countdown \(label)")
         status.button?.setAccessibilityLabel(language.text("\(demoPrefix)Codex 使用额度 · 5 小时 \(primaryText) · 7 天 \(secondaryText) · \(shortState) · \(statusValue)", "\(demoPrefix)Codex usage · 5-hour \(primaryText) · 7-day \(secondaryText) · \(shortState) · \(statusValue)"))
-        let failureText = quotaReadFailed ? AppNotice.quotaReadFailed.text(in: language) : nil
+        let failureText: String?
+        if accountSyncing {
+            failureText = language.text("检测到账户状态变化，正在同步额度…", "Account changed; syncing usage…")
+        } else {
+            failureText = quotaReadFailed ? AppNotice.quotaReadFailed.text(in: language) : nil
+        }
         status.button?.toolTip = language.text("\(demoPrefix)Codex · \(shortState)\n5 小时：\(primaryText) · 7 天：\(secondaryText)\n\(failureText ?? language.reason(decision.reason))", "\(demoPrefix)Codex · \(shortState)\n5-hour: \(primaryText) · 7-day: \(secondaryText)\n\(failureText ?? language.reason(decision.reason))")
         popoverController.update(snapshot: snapshot, decision: decision, error: failureText, draft: ideaStore.draft, ideas: ideaStore.ideas, weekly: weekly, storageAvailable: !ideaStoreLoadFailure, language: language, quote: currentQuote, forceDraft: forceDraft)
         ideaLibraryWindow?.update(ideas: ideaStore.ideas, language: language)
@@ -332,7 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         popoverController.onRefresh = { [weak self] in
             guard let self, !self.demoMode else { return }
-            self.client.refresh()
+            self.refreshUsageNow()
         }
         popoverController.onQuit = { [weak self] in self?.quit() }
         popoverController.onClose = { [weak self] in self?.popover.performClose(nil) }
@@ -582,7 +648,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    @objc private func refresh() { client.refresh() }
+    @objc private func refresh() { refreshUsageNow() }
+    private func refreshUsageNow() {
+        accountSyncing = true
+        quotaReadFailed = false
+        discardSnapshotOnRefreshFailure = true
+        authFileChangeWorkItem?.cancel()
+        authFileChangeWorkItem = nil
+        client.restartAndRefresh()
+        render()
+    }
+    private func beginAccountSync() {
+        snapshot = nil
+        accountSyncing = true
+        quotaReadFailed = false
+        discardSnapshotOnRefreshFailure = true
+        celebrationPanel?.close()
+        render()
+    }
+    private func codexAuthFileChanged() {
+        guard !demoMode else { return }
+        beginAccountSync()
+        client.stop()
+        authFileChangeWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.authFileChangeWorkItem = nil
+            self.client.refresh()
+        }
+        authFileChangeWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: workItem)
+    }
+    private static func codexHomeURL() -> URL {
+        if let value = ProcessInfo.processInfo.environment["CODEX_HOME"], !value.isEmpty {
+            let expanded = (value as NSString).expandingTildeInPath
+            return URL(fileURLWithPath: expanded, isDirectory: true).standardizedFileURL
+        }
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+    }
     @objc private func quit() {
         draftSaveTimer?.invalidate()
         draftSaveTimer = nil
@@ -619,6 +723,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate(); countdownTimer?.invalidate(); draftSaveTimer?.invalidate(); demoTimer?.invalidate()
+        authFileMonitor?.stop()
+        authFileChangeWorkItem?.cancel(); authFileChangeWorkItem = nil
         if !ideaStoreLoadFailure,
            draftPersistenceNeedsRetry || draftForFlush != ideaStore.draft {
             do { try ideaStore.setDraft(draftForFlush) } catch { /* final best-effort flush */ }
@@ -626,6 +732,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.stop()
         if instanceLockDescriptor >= 0 { close(instanceLockDescriptor); instanceLockDescriptor = -1 }
     }
+}
+
+func runAuthFileMonitorSelfTest() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("codex-usage-auth-watch-test-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let authFile = root.appendingPathComponent("auth.json")
+    try Data("fake-account-a".utf8).write(to: authFile)
+
+    var changeDetected = false
+    let monitor = CodexAuthFileMonitor(authFileURL: authFile, interval: 0.01) { changeDetected = true }
+    monitor.start()
+    try Data("fake-account-b".utf8).write(to: authFile, options: .atomic)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+    monitor.stop()
+    guard changeDetected else {
+        throw NSError(domain: "CodexUsage.AuthFileMonitorTest", code: 1, userInfo: [NSLocalizedDescriptionKey: "Atomic auth.json replacement was not detected."])
+    }
+    print("auth_file_metadata_change_detected=true; credential_contents_read=false")
+}
+
+func runAppServerRestartSelfTest() throws {
+    let client = UsageClient()
+    var restartIssued = false
+    var completedState: String?
+    client.onUpdate = { result in
+        guard restartIssued else { return }
+        switch result {
+        case .success(let snapshot):
+            let decision = QuotaReducer.reduce(
+                snapshot: snapshot,
+                now: Date().timeIntervalSince1970,
+                monotonicNow: ProcessInfo.processInfo.systemUptime
+            )
+            completedState = "\(decision.availability)"
+        case .failure(let error):
+            completedState = "error: \(error.localizedDescription)"
+        }
+    }
+    client.refresh()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        restartIssued = true
+        client.restartAndRefresh()
+    }
+    let deadline = Date().addingTimeInterval(25)
+    while completedState == nil, Date() < deadline {
+        RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.1)))
+    }
+    client.stop()
+    guard let completedState else {
+        throw NSError(domain: "CodexUsage.AppServerRestartTest", code: 1, userInfo: [NSLocalizedDescriptionKey: "The restarted app-server did not return a quota snapshot before timeout."])
+    }
+    guard !completedState.hasPrefix("error:") else {
+        throw NSError(domain: "CodexUsage.AppServerRestartTest", code: 2, userInfo: [NSLocalizedDescriptionKey: completedState])
+    }
+    print("app_server_restart_and_fresh_quota_read=passed; state=\(completedState)")
 }
 
 func renderPopoverPreview(to path: String, dark: Bool, language: AppLanguage) throws {
@@ -785,6 +948,14 @@ if let index = CommandLine.arguments.firstIndex(of: "--preview-reset"), CommandL
         fputs(error.localizedDescription + "\n", stderr)
         exit(1)
     }
+} else if CommandLine.arguments.contains("--test-auth-file-monitor") {
+    do { try runAuthFileMonitorSelfTest() }
+    catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
+    exit(0)
+} else if CommandLine.arguments.contains("--test-app-server-restart") {
+    do { try runAppServerRestartSelfTest() }
+    catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
+    exit(0)
 } else if CommandLine.arguments.contains("--probe") {
     let client = UsageClient()
     client.onUpdate = { result in
